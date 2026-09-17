@@ -1,0 +1,17 @@
+{
+  "name": "fintech-chat-rooms-typescript",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types src/chat_service.test.ts",
+    "demo": "node --experimental-strip-types src/chat_service.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  }
+}
