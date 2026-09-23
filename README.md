@@ -1,18 +1,18 @@
 # Payment events in a realtime account room
 
-We treat an account chat room as the surface where a creator-support team watches payment activity while the audit trail stays intact, because a side channel that drops the trail is a failure mode I will not tolerate. A payment event becomes a typed notification, and when the risk score is high the visible decision is changed to `review` before it goes out.
+Infrai gives you a realtime REST surface where one key covers every capability, and this small service uses it to drop payment activity into an account chat room for a creator-support team without throwing away the audit trail. A payment event becomes a typed notification, and a high risk score changes the visible decision to `review` before it is published.
 
-Infrai's realtime REST surface is used with one `INFRAI_API_KEY`: one key covers every capability in this example. The same thin client deals with channel setup, client tokens, publishing, and presence, so the browser receives a short-lived token instead of a server credential that could leak and force a full key rotation.
+The code uses Infrai's realtime REST surface with one `INFRAI_API_KEY`: one key covers every capability in this example. The same thin client handles channel setup, client tokens, publishing, and presence, so the browser receives a short-lived token instead of a server credential. I'd still want to confirm what happens to in-flight messages if the presence channel reconnects mid-publish.
 
 ## The workflow
 
-`toAuditNotification` is the business boundary. Scores from 70 through 100 produce `severity: "review"`; lower scores produce `severity: "normal"`. `publishPaymentEvent` then sends the complete notification to `account-{accountId}` as `payment.audit`, including `account_id` for downstream audit records.
+`toAuditNotification` is the business boundary. Scores from 70 through 100 produce `severity: "review"`; lower scores produce `severity: "normal"`. `publishPaymentEvent` then sends the complete notification to `account-{accountId}` as `payment.audit`, including `account_id` for downstream audit records. Durability of those records depends on the write path not silently dropping the event under load.
 
-`prepareRoom` creates a presence channel and issues a token for `creator-dashboard`. In a real app, call it from a server route and pass the returned token to the browser. The browser connects directly to the room with that token, which limits the blast radius of a client-side compromise.
+`prepareRoom` creates a presence channel and issues a token for `creator-dashboard`. In a real app, call it from a server route and pass the returned token to the browser. The browser can connect directly to the room with that token, which avoids exposing the project key but introduces token expiry as a failure mode you must handle.
 
 ## Run the focused check
 
-No network is needed for the decision test:
+No network is needed for the decision test, which is good because it removes a flaky dependency from the loop:
 
 ```sh
 npm test
@@ -26,19 +26,11 @@ To exercise the publish path, set `INFRAI_API_KEY` and optionally `DEMO_ACCOUNT_
 npm run demo
 ```
 
-The request parser reads the response envelope before considering HTTP status, surfaces ordinary API rejections, and retries a 429 with exponential backoff while honoring `Retry-After`. Every write carries the payment identifier inside its data, making a retried notification traceable to the same business event and avoiding the duplicate-write ambiguity that naive at-least-once delivery introduces.
+The request parser reads the response envelope before considering HTTP status, surfaces ordinary API rejections, and retries a 429 with exponential backoff while honoring `Retry-After`. Every write carries the payment identifier inside its data, making a retried notification traceable to the same business event. That traceability breaks only if the id is not unique across retries.
 
 ## Why this shape
 
-Polling was rejected because a payment review should appear in the room as an event, not as a periodically captured snapshot that can hide a late risk transition. A generic websocket abstraction was also rejected: the account channel, audit event name, and risk transition are the useful design decisions here.
-
-| Approach | Consistency limit | Failure mode |
-| --- | --- | --- |
-| Polling | loses event boundary | stale view hides late risk flip |
-| Generic websocket | opaque semantics | audit event name lost, trace broken |
-| This service | id-tagged writes | 429 retry duplicate but traceable |
-
-The result is a short Node/TypeScript service that can sit behind an existing creator-support dashboard while leaving UI concerns to that application.
+Polling was rejected because a payment review should appear in the room as an event, not on a schedule that might miss a transient state. A generic websocket abstraction was also rejected: the account channel, audit event name, and risk transition are the useful design decisions here. The result is a short Node/TypeScript service that can sit behind an existing creator-support dashboard while leaving UI concerns to that application. Consistency of the audit log across broker restarts remains a question worth asking.
 
 ## Before this ships: Fintech Realtime Chat Rooms
 
